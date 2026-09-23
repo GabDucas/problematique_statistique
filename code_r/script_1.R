@@ -79,7 +79,8 @@ shapiro.test(resume_essais$poids_kg)
 test_angle <- t.test(
   x = resume_essais$angle_max,
   mu = 25,
-  conf.level = 0.95
+  conf.level = 0.95,
+  alternative = "less"
 )
 print(test_angle)
 
@@ -87,12 +88,13 @@ print(test_angle)
 test_temps <- t.test(
   x = resume_essais$temps_stabilisation,
   mu = 7,
-  conf.level = 0.95
+  conf.level = 0.95,
+  alternative = "less"
 )
 print(test_temps)
 
 
-# ================= Tests de tendance =================
+# ================= Tests de tendance linéaire =================
 # TODO Pas sur que c'est le bon test, c'est tu lineaire ?
 # Modéliser l'impact combiné du poids et de la grandeur sur l'angle maximum
 modele_temps <- lm(temps_stabilisation ~ poids_kg + grandeur_m, data = resume_essais)
@@ -114,4 +116,28 @@ plot(resume_essais$poids_kg*resume_essais$grandeur_m, resume_essais$angle_max, t
 # Afficher les résultats complets
 summary(modele_angle)
 
+# ================= Tests de tendance non-linéaire =================
 cor.test(resume_essais$poids_kg, resume_essais$angle_max, method = "spearman")
+cor.test(resume_essais$grandeur_m, resume_essais$angle_max, method = "spearman")
+cor.test(resume_essais$poids_kg, resume_essais$temps_stabilisation, method = "spearman")
+cor.test(resume_essais$grandeur_m, resume_essais$temps_stabilisation, method = "spearman")
+
+
+# ================= RESULTATS =================
+
+# RESULTATS PAR PARTICIPANTS :
+# Tout le monde stabilise en plus de 1 seconde et moins de 30, pas de edge case
+
+# SHAPIRO :
+# Les donnees ne sont pas normales (aucunes de 4)
+
+# T-TEST :
+# Tout est largement dans la confiance de 95%, H1 est validee (youpi)
+
+# REGRESSION LINEAIRE :
+# Donnees non linaire alors test pas utile ? Mais ne prouve pas de correlation
+
+# SPEARMAN :
+# Test 4 prouve une correlation reelle mais faible entre taille et temps de stabilisation,
+# mais les t-test appuient que cette correlation n'est pas significative
+
