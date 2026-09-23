@@ -3,7 +3,7 @@ library(pwr)
 library(tidyverse)
 
 # Extraire tous les fichiers Thunder dans un data_frame
-fichiers <- list.files(path = "C:/Users/antoi/Repo_Stat_S8/problematique_statistique/Données THUNDER - partie1",
+fichiers <- list.files(path = "../Données THUNDER - partie1",
                        pattern = "^Thunder_.*", 
                        full.names = TRUE)
 
