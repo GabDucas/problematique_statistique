@@ -17,7 +17,7 @@ fichiers <- set_names(fichiers, noms_fichiers)
 df_global <- map_dfr(fichiers, read_table, .id = "fichier")
 
 # Extraire les donnees des titres de fichiers
-df_propre <- df_global |>
+df_global <- df_global |>
   mutate(
     # Extrait les chiffres situés après "Poids" et avant "Kg"
     poids_kg = as.numeric(str_extract(fichier, "(?<=Poids)[0-9.]+")),
