@@ -1,6 +1,7 @@
 library(BSDA)
 library(pwr)
 library(tidyverse)
+library(ggplot2)
 
 # ================= Extractions données =================
 # Extraire tous les fichiers Thunder dans un data_frame
@@ -141,3 +142,23 @@ cor.test(resume_essais$grandeur_m, resume_essais$temps_stabilisation, method = "
 # Test 4 prouve une correlation reelle mais faible entre taille et temps de stabilisation,
 # mais les t-test appuient que cette correlation n'est pas significative
 
+
+boxplot(resume_essais$temps_stabilisation)
+library(ggplot2)
+
+ggplot(resume_essais, aes(x="", y = angle_max)) +
+  geom_boxplot(outlier.shape = NA) +
+  labs(title = 'Angle max')+
+  geom_point(width = 0.1, height = 0, size = 2, alpha = 0.7) +
+  theme_classic()
+
+  geom_jitter(width = 0.15, alpha = 0.6)
+  
+  ggplot(resume_essais, aes(x="", y = temps_stabilisation)) +
+    geom_boxplot(outlier.shape = NA) +
+    labs(title = 'Temps de stabilisation')+
+    geom_point(width = 0.1, height = 0, size = 2, alpha = 0.7) +
+    theme_classic()
+  geom_jitter(width = 0.15, alpha = 0.6)
+  
+  
