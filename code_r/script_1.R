@@ -69,12 +69,112 @@ resume_essais <- df_global |>
     valid_test = (temps_stabilisation < 7) & (angle_max < 25)
   )
 
-# ================= Preuve non normalité =================
-# Shapiro pour la normalite des donnees (elles ne le sont pas)
-shapiro.test(resume_essais$angle_max)
-shapiro.test(resume_essais$temps_stabilisation)
-shapiro.test(resume_essais$grandeur_m)
-shapiro.test(resume_essais$poids_kg)
+# ================= Visualisation des données ================
+# Exemple d'une prise de donnee
+essai1 <- filter(df_global, fichier == noms_fichiers[1])
+essai1 <- essai1 |>
+  mutate(
+    # str_replace change les virgules en points (si présentes), puis as.numeric convertit le texte en nombre
+    angle = as.numeric(str_replace_all(angle, ",", ".")),
+    temps = as.numeric(str_replace_all(temps, ",", "."))
+  )
+
+plot(
+  essai1$angle ~ essai1$temps,
+  type = "l", 
+  ylab = "Angle (deg)",
+  xlab = "Temps (s)",
+  main = "Angle d'inclinaison de l'essai 1",
+  sub = paste("Participant", essai1$poids_kg[1], "Kg,", essai1$grandeur_m[1], "m")
+)
+grid()
+
+# Moustsches
+boxplot(
+  resume_essais$angle_max, 
+  main="Distribution de l'angle max\n des simulations",
+  ylab="Angle max (deg)",
+  xlab="Tentative")
+boxplot(
+  resume_essais$temps_stabilisation, 
+  main="Distribution de l'angle max\n des simulations",
+  ylab="Angle max (deg)",
+  xlab="Tentative")
+
+# Distribution echantillon
+ggplot(resume_essais, aes(x = poids_kg, y = grandeur_m, color = valid_test)) +
+  geom_point(size = 3, alpha = 0.7) +
+  
+  # Lignes pointillees HN
+  geom_vline(xintercept = 115.81, linetype = "dashed", color = "#7f8c8d") +
+  geom_hline(yintercept = 1.8627, linetype = "dashed", color = "#7f8c8d") +
+  
+  # PASS FAIL couleurs
+  scale_color_manual(
+    values = c("FALSE" = "#e74c3c", "TRUE" = "#2ecc71"), 
+    labels = c("Échec", "Succès")
+  ) +
+  labs(
+    title = "Distribution anthropométrique des essais THUNDER",
+    subtitle = "Les lignes pointillées identifient le seuil des profils Hors-Norme (> 95e percentile)",
+    x = "Poids de l'utilisateur (kg)",
+    y = "Taille de l'utilisateur (m)",
+    color = "Résultat"
+  ) +
+  theme_minimal()
+
+# Full fail, fail 2 cas, pass (4 barres)
+resume_essais <- resume_essais |>
+  mutate(
+    groupe_principal = ifelse(valid_test == TRUE, "Succès", "Échec total"),
+    type_resultat = case_when(
+      temps_stabilisation <= 7 & angle_max <= 25 ~ "Succès total",
+      temps_stabilisation > 7 & angle_max <= 25  ~ "Échec : Temps seul",
+      temps_stabilisation <= 7 & angle_max > 25  ~ "Échec : Angle seul",
+      temps_stabilisation > 7 & angle_max > 25   ~ "Échec double"
+    )
+  )
+
+ggplot(resume_essais, aes(x = groupe_principal, fill = type_resultat)) +
+  geom_bar(color = "black", alpha = 0.8, width = 0.6) +
+  geom_text(stat = "count", aes(label = after_stat(count)), 
+            position = position_stack(vjust = 0.5), size = 5, fontface = "bold") +
+  
+  scale_fill_brewer(palette = "Blues", direction = -1) +
+  labs(
+    title = "Comparaison echec/reussite de la fiabilité du THUNDER",
+    x = NULL,
+    y = "Nombre d'essais",
+    fill = "Détail du résultat"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 12, face = "bold"),
+    legend.position = "right"
+  )
+
+# Tendances centrales et de dispersion
+statistiques_descriptives <- resume_essais |>
+  select(
+    `Angle maximal atteint` = angle_max, 
+    `Temps de stabilisation` = temps_stabilisation
+  ) |>
+  pivot_longer(cols = everything(), names_to = "metrique", values_to = "valeur") |>
+  group_by(metrique) |>
+  summarise(
+    # Tendances centrales
+    moyenne = mean(valeur, na.rm = TRUE),
+    mediane = median(valeur, na.rm = TRUE),
+    
+    # Tendances de dispersion
+    ecart_type = sd(valeur, na.rm = TRUE),
+    variance = var(valeur, na.rm = TRUE),
+    etendue = max(valeur, na.rm = TRUE) - min(valeur, na.rm = TRUE),
+    iqr = IQR(valeur, na.rm = TRUE)
+  )
+print(statistiques_descriptives)
+
+
 
 # ================= Tests des moyennes (t test) =================
 # Test a faire : Test en t
@@ -109,44 +209,31 @@ test_limite_reussite <- prop.test(
 taux_garanti <- test_limite_reussite$conf.int[1]
 print(paste("Le système garantit un taux de réussite d'au moins :", round(taux_garanti * 100, 2), "%"))
 
-# 4. Test Z pour le taux de réussite (Objectif cible : 95%)
-test_proportion_95 <- prop.test(
-  x = succes, 
-  n = n_total, 
-  p = 0.95,
-  conf.level = 0.95,
-  alternative = "greater"
-)
-
-print(test_proportion_95)
-
-# ================= Tests de tendance linéaire =================
-# TODO Pas sur que c'est le bon test, c'est tu lineaire ?
-# Modéliser l'impact combiné du poids et de la grandeur sur l'angle maximum
-modele_temps <- lm(temps_stabilisation ~ poids_kg + grandeur_m, data = resume_essais)
-
+# ================= Plot données (non-linéaire) =================
 plot(resume_essais$poids_kg, resume_essais$temps_stabilisation, type="p")
 plot(resume_essais$grandeur_m, resume_essais$temps_stabilisation, type="p")
 plot(resume_essais$poids_kg*resume_essais$grandeur_m, resume_essais$temps_stabilisation, type="p")
 
-# Afficher les résultats complets
-summary(modele_temps)
-
-# Modéliser l'impact combiné du poids et de la grandeur sur l'angle maximum
-modele_angle <- lm(angle_max ~ poids_kg + grandeur_m, data = resume_essais)
-
 plot(resume_essais$poids_kg, resume_essais$angle_max, type="p")
 plot(resume_essais$grandeur_m, resume_essais$angle_max, type="p")
 plot(resume_essais$poids_kg*resume_essais$grandeur_m, resume_essais$angle_max, type="p")
 
-# Afficher les résultats complets
-summary(modele_angle)
+# Divise la fenêtre d'affichage en 2 lignes et 3 colonnes
+par(mfrow = c(2, 3), cex.main = 1.5, cex.lab = 1.3, cex.axis = 1.1, mar = c(5, 5, 4, 2))
+with(resume_essais, {
+  # Temps de stabilisation
+  plot(poids_kg, temps_stabilisation, pch=16, col="blue", xlab="Poids (kg)", ylab="Temps (s)", main="Temps vs Poids")
+  plot(grandeur_m, temps_stabilisation, pch=16, col="blue", xlab="Taille (m)", ylab="Temps (s)", main="Temps vs Taille")
+  plot(poids_kg * grandeur_m, temps_stabilisation, pch=16, col="blue", xlab="Poids x Taille", ylab="Temps (s)", main="Temps vs Facteur combiné")
+  
+  # Angle maximal
+  plot(poids_kg, angle_max, pch=16, col="red", xlab="Poids (kg)", ylab="Angle (deg)", main="Angle vs Poids")
+  plot(grandeur_m, angle_max, pch=16, col="red", xlab="Taille (m)", ylab="Angle (deg)", main="Angle vs Taille")
+  plot(poids_kg * grandeur_m, angle_max, pch=16, col="red", xlab="Poids x Taille", ylab="Angle (deg)", main="Angle vs Facteur combiné")
+})
+par(mfrow = c(1, 1), cex.main = 1, cex.lab = 1, cex.axis = 1, mar = c(5, 4, 4, 2) + 0.1)
 
-plot(resume_essais$poids_kg, resume_essais$angle_max, type="p")
-plot(resume_essais$grandeur_m, resume_essais$angle_max, type="p")
-plot(resume_essais$poids_kg*resume_essais$grandeur_m, resume_essais$angle_max, type="p")
-
-# ================= Tests de tendance non-linéaire =================
+# ================= Tests de corrélation non-linéaire =================
 cor.test(resume_essais$poids_kg, resume_essais$angle_max, method = "spearman")
 cor.test(resume_essais$grandeur_m, resume_essais$angle_max, method = "spearman")
 cor.test(resume_essais$poids_kg, resume_essais$temps_stabilisation, method = "spearman")
@@ -162,30 +249,30 @@ essais_HN <- resume_essais |>
 succes_HN <- sum(essais_HN$valid_test == TRUE)
 total_HN <- nrow(essais_HN)
 
-# Calcul de la probabilité ponctuelle (la réponse directe pour Noémie)
+# Calcul de la probabilité ponctuelle (la réponse pour Noémie)
 prob_HN <- succes_HN / total_HN
 print(paste("La probabilité observée de succès pour une personne HN est de :", prob_HN * 100, "%"))
 
 # Le test binomial pour obtenir l'intervalle de confiance exact
-test_exact_HN <- binom.test(
+test_succes_in_HN <- binom.test(
   x = succes_HN, 
   n = total_HN, 
   conf.level = 0.95
 )
-print(test_exact_HN)
+print(test_succes_in_HN)
 
 # ================== Test prob Hors norme dans succes ===================
-# 1. Isoler la population des essais réussis (le nouvel échantillon 'n')
+# Isoler la population des essais réussis (le nouvel échantillon 'n')
 essais_succes <- resume_essais |>
   filter(valid_test == TRUE)
 
 n_succes_total <- nrow(essais_succes)
 
-# 2. Compter combien de ces succès proviennent de profils HN (notre 'x')
+# Compter combien de ces succès proviennent de profils HN (notre 'x')
 succes_sont_HN <- sum(essais_succes$poids_kg > 115.81 | essais_succes$grandeur_m > 1.8627)
 
-# 3. Test Z de proportion pour la part des HN parmi les réussites
-test_z_inverse <- prop.test(
+# Test Z de proportion pour la part des HN parmi les réussites
+test_HN_in_succes <- prop.test(
   x = succes_sont_HN, 
   n = n_succes_total, 
   conf.level = 0.95
@@ -193,63 +280,4 @@ test_z_inverse <- prop.test(
 
 print(paste("Nombre de succès totaux :", n_succes_total))
 print(paste("Succès provenant de HN :", succes_sont_HN))
-print(test_z_inverse)
-
-
-
-
-# ================= RESULTATS =================
-
-# RESULTATS PAR PARTICIPANTS :
-# Tout le monde stabilise en plus de 1 seconde et moins de 30, pas de edge case
-
-# SHAPIRO :
-# Les donnees ne sont pas normales (aucunes de 4)
-
-# T-TEST :
-# Tout est largement dans la confiance de 95%, H1 0.est validee (youpi)
-
-# REGRESSION LINEAIRE :
-# Donnees non linaire alors test pas utile ? Mais ne prouve pas de correlation
-
-# SPEARMAN :
-# Test 4 prouve une correlation reelle mais faible entre taille et temps de stabilisation,
-# mais les t-test appuient que cette correlation n'est pas significative
-
-# Il faut d'abord créer une colonne numérique (0 ou 1) pour l'axe Y
-resume_essais <- resume_essais |>
-  mutate(valid_test_num = as.numeric(valid_test))
-
-# Graphique de la régression logistique
-ggplot(resume_essais, aes(x = poids_kg, y = valid_test_num)) +
-  # geom_jitter ajoute un micro-bruit vertical pour éviter que les points se superposent
-  geom_point(height = 0.05, width = 0, alpha = 0.5, color = "#34495e") +
-  # geom_smooth trace la courbe de prédiction logistique
-  geom_smooth(method = "glm", method.args = list(family = "binomial"), 
-              color = "#3498db", fill = "#bdc3c7", se = TRUE) +
-  labs(
-    title = "Probabilité de succès en fonction du poids",
-    x = "Poids de l'utilisateur (kg)",
-    y = "Probabilité de stabilisation sécuritaire"
-  ) +
-  scale_y_continuous(breaks = c(0, 1), labels = c("0 (Échec)", "1 (Succès)")) +
-  theme_minimal()
-
-# Il faut d'abord créer une colonne numérique (0 ou 1) pour l'axe Y
-resume_essais <- resume_essais |>
-  mutate(valid_test_num = as.numeric(valid_test))
-
-# Graphique de la régression logistique
-ggplot(resume_essais, aes(x = grandeur_m, y = valid_test_num)) +
-  # geom_jitter ajoute un micro-bruit vertical pour éviter que les points se superposent
-  geom_point(height = 0.05, width = 0, alpha = 0.5, color = "#34495e") +
-  # geom_smooth trace la courbe de prédiction logistique
-  geom_smooth(method = "glm", method.args = list(family = "binomial"), 
-              color = "#3498db", fill = "#bdc3c7", se = TRUE) +
-  labs(
-    title = "Probabilité de succès en fonction de la taille",
-    x = "Taille de l'utilisateur (m)",
-    y = "Probabilité de stabilisation sécuritaire"
-  ) +
-  scale_y_continuous(breaks = c(0, 1), labels = c("0 (Échec)", "1 (Succès)")) +
-  theme_minimal()
+print(test_HN_in_succes)
