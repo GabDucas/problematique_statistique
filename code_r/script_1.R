@@ -64,6 +64,9 @@ resume_essais <- df_global |>
     grandeur_m = first(grandeur_m),
     angle_max = first(angle_max),
     temps_stabilisation = first(temps_stabilisation)
+  )|>
+  mutate(
+    valid_test = (temps_stabilisation < 7) & (angle_max < 25)
   )
 
 # ================= Preuve non normalité =================
@@ -93,6 +96,29 @@ test_temps <- t.test(
 )
 print(test_temps)
 
+succes <- sum(resume_essais$valid_test == TRUE)
+n_total <- nrow(resume_essais)
+
+# 3. Test Z pour le taux de réussite (Trouver le taux de réussite min)
+test_limite_reussite <- prop.test(
+  x = succes, 
+  n = n_total, 
+  conf.level = 0.95,
+  alternative = "greater"
+)
+taux_garanti <- test_limite_reussite$conf.int[1]
+print(paste("Le système garantit un taux de réussite d'au moins :", round(taux_garanti * 100, 2), "%"))
+
+# 4. Test Z pour le taux de réussite (Objectif cible : 95%)
+test_proportion_95 <- prop.test(
+  x = succes, 
+  n = n_total, 
+  p = 0.95,
+  conf.level = 0.95,
+  alternative = "greater"
+)
+
+print(test_proportion_95)
 
 # ================= Tests de tendance linéaire =================
 # TODO Pas sur que c'est le bon test, c'est tu lineaire ?
@@ -116,11 +142,60 @@ plot(resume_essais$poids_kg*resume_essais$grandeur_m, resume_essais$angle_max, t
 # Afficher les résultats complets
 summary(modele_angle)
 
+plot(resume_essais$poids_kg, resume_essais$angle_max, type="p")
+plot(resume_essais$grandeur_m, resume_essais$angle_max, type="p")
+plot(resume_essais$poids_kg*resume_essais$grandeur_m, resume_essais$angle_max, type="p")
+
 # ================= Tests de tendance non-linéaire =================
 cor.test(resume_essais$poids_kg, resume_essais$angle_max, method = "spearman")
 cor.test(resume_essais$grandeur_m, resume_essais$angle_max, method = "spearman")
 cor.test(resume_essais$poids_kg, resume_essais$temps_stabilisation, method = "spearman")
 cor.test(resume_essais$grandeur_m, resume_essais$temps_stabilisation, method = "spearman")
+cor.test(resume_essais$poids_kg, as.numeric(resume_essais$valid_test), method = "spearman")
+cor.test(resume_essais$grandeur_m, as.numeric(resume_essais$valid_test), method = "spearman")
+
+# ================== Test prob succes dans hors norme ===================
+# Rappel de l'extraction des données HN
+essais_HN <- resume_essais |>
+  filter(poids_kg > 115.81 | grandeur_m > 1.8627)
+
+succes_HN <- sum(essais_HN$valid_test == TRUE)
+total_HN <- nrow(essais_HN)
+
+# Calcul de la probabilité ponctuelle (la réponse directe pour Noémie)
+prob_HN <- succes_HN / total_HN
+print(paste("La probabilité observée de succès pour une personne HN est de :", prob_HN * 100, "%"))
+
+# Le test binomial pour obtenir l'intervalle de confiance exact
+test_exact_HN <- binom.test(
+  x = succes_HN, 
+  n = total_HN, 
+  conf.level = 0.95
+)
+print(test_exact_HN)
+
+# ================== Test prob Hors norme dans succes ===================
+# 1. Isoler la population des essais réussis (le nouvel échantillon 'n')
+essais_succes <- resume_essais |>
+  filter(valid_test == TRUE)
+
+n_succes_total <- nrow(essais_succes)
+
+# 2. Compter combien de ces succès proviennent de profils HN (notre 'x')
+succes_sont_HN <- sum(essais_succes$poids_kg > 115.81 | essais_succes$grandeur_m > 1.8627)
+
+# 3. Test Z de proportion pour la part des HN parmi les réussites
+test_z_inverse <- prop.test(
+  x = succes_sont_HN, 
+  n = n_succes_total, 
+  conf.level = 0.95
+)
+
+print(paste("Nombre de succès totaux :", n_succes_total))
+print(paste("Succès provenant de HN :", succes_sont_HN))
+print(test_z_inverse)
+
+
 
 
 # ================= RESULTATS =================
@@ -132,7 +207,7 @@ cor.test(resume_essais$grandeur_m, resume_essais$temps_stabilisation, method = "
 # Les donnees ne sont pas normales (aucunes de 4)
 
 # T-TEST :
-# Tout est largement dans la confiance de 95%, H1 est validee (youpi)
+# Tout est largement dans la confiance de 95%, H1 0.est validee (youpi)
 
 # REGRESSION LINEAIRE :
 # Donnees non linaire alors test pas utile ? Mais ne prouve pas de correlation
@@ -141,3 +216,40 @@ cor.test(resume_essais$grandeur_m, resume_essais$temps_stabilisation, method = "
 # Test 4 prouve une correlation reelle mais faible entre taille et temps de stabilisation,
 # mais les t-test appuient que cette correlation n'est pas significative
 
+# Il faut d'abord créer une colonne numérique (0 ou 1) pour l'axe Y
+resume_essais <- resume_essais |>
+  mutate(valid_test_num = as.numeric(valid_test))
+
+# Graphique de la régression logistique
+ggplot(resume_essais, aes(x = poids_kg, y = valid_test_num)) +
+  # geom_jitter ajoute un micro-bruit vertical pour éviter que les points se superposent
+  geom_point(height = 0.05, width = 0, alpha = 0.5, color = "#34495e") +
+  # geom_smooth trace la courbe de prédiction logistique
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), 
+              color = "#3498db", fill = "#bdc3c7", se = TRUE) +
+  labs(
+    title = "Probabilité de succès en fonction du poids",
+    x = "Poids de l'utilisateur (kg)",
+    y = "Probabilité de stabilisation sécuritaire"
+  ) +
+  scale_y_continuous(breaks = c(0, 1), labels = c("0 (Échec)", "1 (Succès)")) +
+  theme_minimal()
+
+# Il faut d'abord créer une colonne numérique (0 ou 1) pour l'axe Y
+resume_essais <- resume_essais |>
+  mutate(valid_test_num = as.numeric(valid_test))
+
+# Graphique de la régression logistique
+ggplot(resume_essais, aes(x = grandeur_m, y = valid_test_num)) +
+  # geom_jitter ajoute un micro-bruit vertical pour éviter que les points se superposent
+  geom_point(height = 0.05, width = 0, alpha = 0.5, color = "#34495e") +
+  # geom_smooth trace la courbe de prédiction logistique
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), 
+              color = "#3498db", fill = "#bdc3c7", se = TRUE) +
+  labs(
+    title = "Probabilité de succès en fonction de la taille",
+    x = "Taille de l'utilisateur (m)",
+    y = "Probabilité de stabilisation sécuritaire"
+  ) +
+  scale_y_continuous(breaks = c(0, 1), labels = c("0 (Échec)", "1 (Succès)")) +
+  theme_minimal()
