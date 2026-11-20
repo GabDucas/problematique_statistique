@@ -99,61 +99,61 @@ ggplot(satisfaction_participant, aes(x = Poids, y = appreciation_moy)) +
   theme_minimal()
 
 # ================= Tests statistiques =================
-# ----- Test 1 : Sécurité Thunder vs Compétiteur -----
-# TODO (à revoir) : l'objectif est de montrer que le Thunder est AU MOINS aussi
-# sécuritaire -> remplacer par un test de non-infériorité :
-#   H0 : p_echec_T - p_echec_C >= delta   vs   H1 : p_echec_T - p_echec_C < delta
-#   Rejet de H0 si la borne sup. unilatérale à 95 % de la différence appariée < delta
-#   (calcul rapide : borne sup. ~ +0.94 pt de %). Marge delta à fixer et justifier.
-# H0 : la proportion d'essais sécuritaires est égale pour les deux produits
-# H1 : les proportions sont différentes
-# Données appariées (chaque essai est évalué pour les deux produits)
-# -> test de McNemar exact
+alpha <- 0.05
 
+# ----- Test 1 : Sécurité Thunder vs Compétiteur (McNemar) -----
+# H0 : la proportion d'essais sécuritaires est égale pour les deux produits
+# H1 : les proportions sont différentes (bilatéral)
+# Variable dichotomique, groupes appariés (chaque essai évalué pour les 2 produits)
 tableau_securite <- table(
   Thunder = df_global$THUNDERsecurite,
   Competiteur = df_global$COMPETITEURsecurite
 )
 print(tableau_securite)
 
-# Paires discordantes : seules celles-ci informent sur la différence
-n_thunder_echec_seul <- tableau_securite["0", "1"]  # Thunder échoue, Compétiteur réussit
-n_comp_echec_seul    <- tableau_securite["1", "0"]  # Compétiteur échoue, Thunder réussit
-n_discordants <- n_thunder_echec_seul + n_comp_echec_seul
-
-# McNemar exact = test binomial sur les paires discordantes (p = 0.5 sous H0)
-test_securite <- binom.test(n_thunder_echec_seul, n_discordants, p = 0.5)
-print(test_securite)
-
-# ----- Puissance du test 1 -----
-# Ne pas rejeter H0 ne prouve pas l'égalité : on vérifie quelle différence
-# de taux d'échec le test aurait pu détecter avec une puissance de 80 %.
-# Formule de puissance du test de McNemar (Connor, 1987)
+# Paires discordantes
+b <- tableau_securite["0", "1"]  # Thunder échoue, Compétiteur réussit
+c <- tableau_securite["1", "0"]  # Compétiteur échoue, Thunder réussit
 n_paires <- sum(tableau_securite)
-psi <- n_discordants / n_paires   # proportion de paires discordantes
-alpha <- 0.05
 
+# Condition : fréquence attendue fA = (b + c) / 2 >= 5
+f_attendue <- (b + c) / 2
+cat("Fréquence attendue fA =", f_attendue, "\n")
+
+# Statistique du Chi-carré de McNemar : (b - c)^2 / (b + c), DL = 1
+chi2_securite <- (b - c)^2 / (b + c)
+chi2_critique <- qchisq(1 - alpha, df = 1)
+p_securite <- 1 - pchisq(chi2_securite, df = 1)
+cat("Chi2 =", round(chi2_securite, 3), " Chi2 critique =", round(chi2_critique, 3),
+    " p-value =", round(p_securite, 4), "\n")
+
+# ----- Puissance a posteriori du test 1 -----
+# Formule de puissance du test de McNemar (Connor, 1987), hors notes de cours
+# delta = différence des taux d'échec, psi = proportion de paires discordantes
 puissance_mcnemar <- function(delta, n, psi, alpha) {
   z <- qnorm(1 - alpha / 2)
   pnorm((abs(delta) * sqrt(n) - z * sqrt(psi)) / sqrt(psi - delta^2))
 }
+psi <- (b + c) / n_paires
+delta_obs <- (b - c) / n_paires
 
-# Plus petite différence de taux d'échec détectable avec 80 % de puissance
+# Puissance pour l'effet observé
+puissance_securite <- puissance_mcnemar(delta_obs, n_paires, psi, alpha)
+cat("Différence de taux d'échec observée (T - C) :", round(100 * delta_obs, 2), "points de %\n")
+cat("Puissance a posteriori (effet observé) :", round(puissance_securite, 3), "\n")
+
+# Plus petite différence détectable avec une puissance de 80 %
 delta_min <- uniroot(
   function(d) puissance_mcnemar(d, n_paires, psi, alpha) - 0.80,
   interval = c(1e-6, psi - 1e-6)
 )$root
+cat("Plus petite différence détectable (puissance 80 %) :", round(100 * delta_min, 2), "points de %\n")
 
-cat("Différence de taux d'échec observée :",
-    round(100 * (n_comp_echec_seul - n_thunder_echec_seul) / n_paires, 2), "points de %\n")
-cat("Plus petite différence détectable (puissance 80 %) :",
-    round(100 * delta_min, 2), "points de %\n")
-
-# ----- Test 2 : Satisfaction Thunder vs Compétiteur -----
-# H0 : la satisfaction moyenne est égale pour les deux produits
-# H1 : la satisfaction moyenne est différente
-# Données appariées (mêmes participants) -> test t apparié
-# Moyenne par participant pour avoir des paires indépendantes (24 paires)
+# ----- Test 2 : Satisfaction Thunder vs Compétiteur (Wilcoxon apparié) -----
+# H0 : la satisfaction est égale pour les deux produits
+# H1 : la satisfaction est différente (bilatéral)
+# Groupes appariés (mêmes participants). Moyenne par participant pour avoir
+# des paires indépendantes (24 paires)
 satisfaction_produits <- df_global |>
   group_by(ParticipantID) |>
   summarise(
@@ -161,25 +161,153 @@ satisfaction_produits <- df_global |>
     competiteur = mean(COMPETITEURappreciation)
   )
 
-test_satisfaction <- t.test(
+# Normalité des différences (Shapiro-Wilk) -> choix entre t apparié et Wilcoxon
+differences <- satisfaction_produits$thunder - satisfaction_produits$competiteur
+print(shapiro.test(differences))
+
+# Normalité rejetée et n < 30 -> test des rangs signés de Wilcoxon
+test_satisfaction <- wilcox.test(
   satisfaction_produits$thunder,
   satisfaction_produits$competiteur,
   paired = TRUE
 )
 print(test_satisfaction)
 
-# ----- Puissance du test 2 -----
-# Plus petite différence détectable avec une puissance de 80 %
-differences <- satisfaction_produits$thunder - satisfaction_produits$competiteur
-puissance_satisfaction <- pwr.t.test(
-  n = nrow(satisfaction_produits),
-  sig.level = 0.05,
-  power = 0.80,
-  type = "paired"
-)
-print(puissance_satisfaction)
+# ----- Puissance a posteriori du test 2 -----
+# Taille de l'effet (groupes appariés) : d = moyenne des différences / écart-type
+n_participants <- nrow(satisfaction_produits)
+d_obs <- mean(differences) / sd(differences)
+puissance_satisfaction <- pwr.t.test(d = d_obs, n = n_participants,
+                                     sig.level = alpha, type = "paired")
+cat("Taille de l'effet observée d =", round(d_obs, 3), "\n")
+cat("Puissance a posteriori (effet observé) :", round(puissance_satisfaction$power, 3), "\n")
 
-cat("Différence de satisfaction observée :",
-    round(mean(differences), 2), "point\n")
-cat("Plus petite différence détectable (puissance 80 %) :",
-    round(puissance_satisfaction$d * sd(differences), 2), "point\n")
+# Puissance et taille d'échantillon pour détecter une différence de 0.5 point
+d_05 <- 0.5 / sd(differences)
+cat("Puissance pour 0.5 point :",
+    round(pwr.t.test(d = d_05, n = n_participants, sig.level = alpha,
+                     type = "paired")$power, 3), "\n")
+cat("Participants requis pour 0.5 point (puissance 80 %) :",
+    ceiling(pwr.t.test(d = d_05, sig.level = alpha, power = 0.80,
+                       type = "paired")$n), "\n")
+
+# ----- Test 3 : Satisfaction du Thunder selon le parcours (ANOVA mesures répétées) -----
+# H0 : la satisfaction moyenne est égale pour les 5 parcours
+# H1 : au moins un parcours a une satisfaction moyenne différente
+# 5 groupes appariés (mêmes participants sur tous les parcours)
+# n = 24 par groupe >= 20 -> ANOVA pour mesures répétées
+# Moyenne des 3 répétitions par participant et par parcours
+satisfaction_parcours <- df_global |>
+  group_by(ParticipantID, Parcours) |>
+  summarise(appreciation = mean(THUNDERappreciation), .groups = "drop") |>
+  mutate(ParticipantID = factor(ParticipantID),
+         Parcours = factor(Parcours))
+
+# Sphéricité (équivalent de l'égalité des variances en mesures répétées) : test de Mauchly
+# H0 : la sphéricité est respectée
+satisfaction_large <- satisfaction_parcours |>
+  pivot_wider(names_from = Parcours, values_from = appreciation, names_prefix = "P")
+modele_large <- lm(as.matrix(select(satisfaction_large, -ParticipantID)) ~ 1)
+print(mauchly.test(modele_large, X = ~1))
+
+# ANOVA pour mesures répétées
+anova_parcours <- aov(appreciation ~ Parcours + Error(ParticipantID / Parcours),
+                      data = satisfaction_parcours)
+print(summary(anova_parcours))
+
+# ----- Post-hoc du test 3 : parcours 4 vs chacun des autres -----
+# Le parcours 4 semble le moins apprécié (boîtes à moustaches)
+# 4 comparaisons appariées -> correction de Bonferroni : alpha* = alpha / 4
+# H0 : satisfaction parcours 4 = satisfaction parcours k
+# H1 : satisfaction parcours 4 != satisfaction parcours k
+alpha_bonferroni <- alpha / 4
+
+posthoc_parcours <- map_dfr(c("P1", "P2", "P3", "P5"), function(autre) {
+  diff_p <- satisfaction_large$P4 - satisfaction_large[[autre]]
+  # n = 24 < 30 -> normalité des différences (Shapiro) pour choisir le test
+  p_shapiro <- shapiro.test(diff_p)$p.value
+  if (p_shapiro > alpha) {
+    test <- "t apparié"
+    p_test <- t.test(satisfaction_large$P4, satisfaction_large[[autre]], paired = TRUE)$p.value
+  } else {
+    test <- "Wilcoxon apparié"
+    p_test <- wilcox.test(satisfaction_large$P4, satisfaction_large[[autre]],
+                          paired = TRUE, exact = FALSE)$p.value
+  }
+  tibble(
+    comparaison = paste("P4 vs", autre),
+    diff_moyenne = mean(diff_p),
+    p_shapiro = p_shapiro,
+    test = test,
+    p_value = p_test,
+    significatif = p_test <= alpha_bonferroni
+  )
+})
+cat("Seuil de Bonferroni alpha* =", alpha_bonferroni, "\n")
+print(posthoc_parcours)
+
+# ----- Test 4 : Satisfaction du Thunder selon les données anthropométriques (Spearman) -----
+# Relations non linéaires (graphiques) -> rhô de Spearman (relation monotone), n = 24 >= 10
+# Pour chaque variable (âge, taille, poids) :
+# H0 : rho_s = 0 (aucune relation monotone)
+# H1 : rho_s != 0 (bilatéral)
+# Satisfaction moyenne par participant (satisfaction_participant, section visualisation)
+interpreter_rs <- function(rs) {
+  case_when(
+    abs(rs) < 0.25 ~ "faible",
+    abs(rs) < 0.50 ~ "modérée",
+    abs(rs) < 0.75 ~ "élevée",
+    TRUE           ~ "forte"
+  )
+}
+
+test_spearman <- map_dfr(c("age", "taille", "Poids"), function(variable) {
+  test <- cor.test(satisfaction_participant[[variable]],
+                   satisfaction_participant$appreciation_moy,
+                   method = "spearman", exact = FALSE)
+  tibble(
+    variable = variable,
+    rs = unname(test$estimate),
+    relation = interpreter_rs(rs),
+    p_value = test$p.value,
+    significatif = test$p.value <= alpha
+  )
+})
+print(test_spearman)
+
+# ================= Conclusions (pour le PowerPoint) =================
+# Test 1 - Sécurité Thunder vs Compétiteur (Chi-carré de McNemar)
+#   - Taux d'échec : Thunder 1.7 % (6/360) vs Compétiteur 2.5 % (9/360)
+#   - Chi2 = 0.6 < 3.84 (p = 0.44) -> on ne rejette pas H0
+#   - Puissance a posteriori faible (11.8 %) -> on ne peut pas conclure à l'égalité
+#   - Le test détectait toutefois un écart >= 3 points de % (puissance 80 %)
+#     -> pas d'écart de sécurité important entre les deux produits
+#   - ~4 700 essais (~315 participants) seraient requis pour détecter l'écart observé
+#
+# Test 2 - Satisfaction Thunder vs Compétiteur (Wilcoxon apparié)
+#   - Normalité des différences rejetée (Shapiro p < 0.001), n = 24 < 30 -> Wilcoxon
+#   - p = 0.34 -> on ne rejette pas H0
+#   - Puissance a posteriori faible (5 % pour l'effet observé, 22 % pour 0.5 point)
+#     -> résultat non concluant ; ~124 participants requis pour détecter 0.5 point
+#   - Les graphiques montrent des distributions presque identiques, mais une
+#     satisfaction polarisée selon l'âge (voir test 4)
+#
+# Test 3 - Satisfaction du Thunder selon le parcours (ANOVA mesures répétées)
+#   - Sphéricité respectée (Mauchly p = 0.75)
+#   - F(4, 92) = 53.2, p < 0.001 -> au moins un parcours diffère
+#   - Post-hoc (t appariés, Bonferroni alpha* = 0.0125) : le parcours 4 est
+#     significativement moins apprécié que chacun des autres (-1.5 à -2.2 points)
+#   -> Le parcours 4 est le point à améliorer en priorité
+#
+# Test 4 - Satisfaction du Thunder selon les données anthropométriques (Spearman)
+#   - Âge : relation positive forte et significative (rs = 0.91, p < 0.001)
+#   - Taille (rs = -0.21, p = 0.33) et poids (rs = -0.01, p = 0.95) : aucune relation
+#   -> La satisfaction dépend de l'âge, pas de la morphologie ; les participants
+#      plus âgés apprécient nettement plus le Thunder
+#
+# Conclusion générale
+#   - Sécurité et satisfaction globales comparables au compétiteur (aucune différence
+#     détectée), mais l'échantillon est trop petit pour conclure formellement à l'égalité
+#   - Le parcours 4 est nettement moins apprécié
+#   - L'âge est le principal facteur de satisfaction : le Thunder plaît davantage
+#     aux utilisateurs plus âgés
